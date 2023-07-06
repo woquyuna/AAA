@@ -219,9 +219,9 @@ def main():
     petr_net.org_model.eval()
     petr_net.set_data(data)
     get_onnx_model(petr_net,
-                   img, img2lidar, intrinsic, timestamp, ego_pose, ego_pose_inv,
+                   img, img2lidar, intrinsic, ego_pose, ego_pose_inv,
                    prev_exists, mem_embedding, mem_timestamp, mem_egopose, mem_ref_point, mem_velo,
-                   "/mnt/data/userdata/hjj/streampetr_data/streampetr.onnx", 'cuda:0')
+                   "/mnt/data/userdata/hjj/streampetr_data/streampetrV1.1.onnx", 'cuda:0')
 
     import sys
     sys.exit(0)

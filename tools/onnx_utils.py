@@ -46,7 +46,7 @@ def mem_tensor_generator(first_frame, model_cfg):
     mems = []
     if first_frame:
          mems.append(torch.zeros(B, memory_len + num_propagated, embed_dims).to(DEVICE))             # embedding
-         mems.append(torch.zeros(B, memory_len + num_propagated, 1).to(torch.float64).to(DEVICE))    # timestamp TODO:float64 - float32
+         mems.append(torch.zeros(B, memory_len + num_propagated, 1).to(torch.float32).to(DEVICE))    # timestamp    change to delta in deployV1.1
          mems.append(torch.zeros(B, memory_len + num_propagated, 4, 4).to(DEVICE))                   # egopose
          mems.append(torch.zeros(B, memory_len + num_propagated, 3).to(DEVICE))                      # reference_point
          mems.append(torch.zeros(B, memory_len + num_propagated, 2).to(DEVICE))                      # velo
@@ -103,7 +103,7 @@ class nuscenceData:
             print("intrinsic:", data['intrinsic'][0].shape)
             data['intrinsic'][0].cpu().detach().numpy().tofile(dir_path + '/intrinsic_1x4224x2.bin')
 
-            data['timestamp'] = [data['timestamp'][0].data[0][0].unsqueeze(0).to(DEVICE)]     #float64
+            data['timestamp'] = [data['timestamp'][0].data[0][0].unsqueeze(0).to(DEVICE)]     #float64  disabled in deployV1.1
             print("timestamp:", data['timestamp'][0].shape)
             data['timestamp'][0].cpu().detach().numpy().tofile(dir_path + '/timestamp_1.bin')
 
@@ -207,7 +207,6 @@ class nuscenceData:
                    data['mem_embedding'][0], data['mem_timestamp'][0], data['mem_egopose'][0], \
                    data['mem_ref_point'][0], data['mem_velo'][0]
 
-
 class PetrWrapper(torch.nn.Module):
     def __init__(self, org_model):
         super(PetrWrapper, self).__init__()
@@ -224,7 +223,7 @@ class PetrWrapper(torch.nn.Module):
         return outs
 
 def get_onnx_model(model,
-                   img, img2lidar, intrinsic, timestamp, ego_pose, ego_pose_inv,
+                   img, img2lidar, intrinsic, ego_pose, ego_pose_inv,
                    prev_exists, mem_embedding, mem_timestamp, mem_egopose, mem_ref_point, mem_velo,
                    out_path, device):
     model.eval()
@@ -232,7 +231,6 @@ def get_onnx_model(model,
     img_tensor = img.to(device)
     img2lidar = img2lidar.to(device)
     intrinsic = intrinsic.to(device)
-    timestamp = timestamp.to(device)
     ego_pose = ego_pose.to(device)
     ego_pose_inv = ego_pose_inv.to(device)
     prev_exists = prev_exists.to(device)
@@ -244,12 +242,12 @@ def get_onnx_model(model,
 
     torch.onnx.export(
         model,
-        tuple([img_tensor, img2lidar, intrinsic, timestamp, ego_pose, ego_pose_inv,
+        tuple([img_tensor, img2lidar, intrinsic, ego_pose, ego_pose_inv,
                prev_exists, mem_embedding, mem_timestamp, mem_egopose, mem_ref_point, mem_velo]),
         out_path,
         export_params=True,
         opset_version=11,
-        input_names=["img", "img2lidar", "intrinsic", "timestamp", "ego_pose", "ego_pose_inv",
+        input_names=["img", "img2lidar", "intrinsic" , "ego_pose", "ego_pose_inv",
                      "prev_exists", "in_mem_embedding", "in_mem_timestamp", "in_mem_egopose",
                      "in_mem_ref_point", "in_mem_velo"],
         output_names=["all_cls_scores", "all_bbox_preds",

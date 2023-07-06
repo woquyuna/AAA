@@ -333,13 +333,14 @@ class StreamPETRHeadONNX(AnchorFreeHead):
         B = 1
         # load memory from last run, a logic outside is needed
         self.memory_embedding = data['mem_embedding']
-        self.memory_timestamp = data['mem_timestamp']
+        self.memory_timestamp = data['mem_timestamp']   # should be delta-timestamp
         self.memory_egopose = data['mem_egopose']
         self.memory_reference_point = data['mem_ref_point']
         self.memory_velo = data['mem_velo']
 
-        self.memory_timestamp += data['timestamp'].unsqueeze(-1).unsqueeze(-1)
-        self.memory_timestamp = self.memory_timestamp.to(torch.float32)
+        # self.memory_timestamp += data['timestamp'].unsqueeze(-1).unsqueeze(-1)    # mem_timestamp would be updated outside
+        # self.memory_timestamp = self.memory_timestamp.to(torch.float32)
+
         self.memory_egopose = data['ego_pose_inv'].unsqueeze(1) @ self.memory_egopose
         self.memory_reference_point = transform_reference_points(self.memory_reference_point, data['ego_pose_inv'], reverse=False)
         self.memory_timestamp = memory_refresh(self.memory_timestamp[:, :self.memory_len], x)
@@ -351,8 +352,14 @@ class StreamPETRHeadONNX(AnchorFreeHead):
         # for the first frame, padding pseudo_reference_points (non-learnable)
         if self.num_propagated > 0:
             pseudo_reference_points = self.pseudo_reference_points.weight * (self.pc_range[3:6] - self.pc_range[0:3]) + self.pc_range[0:3]
-            self.memory_reference_point[:, :self.num_propagated]  = self.memory_reference_point[:, :self.num_propagated] + (1 - x).view(B, 1, 1) * pseudo_reference_points
-            self.memory_egopose[:, :self.num_propagated]  = self.memory_egopose[:, :self.num_propagated] + (1 - x).view(B, 1, 1, 1) * torch.eye(4, device=x.device)
+            # self.memory_reference_point[:, :self.num_propagated]  = self.memory_reference_point[:, :self.num_propagated] + (1 - x).view(B, 1, 1) * pseudo_reference_points
+            # self.memory_egopose[:, :self.num_propagated]  = self.memory_egopose[:, :self.num_propagated] + (1 - x).view(B, 1, 1, 1) * torch.eye(4, device=x.device)
+            memory_reference_point0 = self.memory_reference_point[:, :self.num_propagated] + (1 - x).view(B, 1, 1) * pseudo_reference_points
+            memory_reference_point1 = self.memory_reference_point[:, self.num_propagated:]
+            self.memory_reference_point = torch.concat([memory_reference_point0, memory_reference_point1], dim=1)
+            memory_egopose0 = self.memory_egopose[:, :self.num_propagated] + (1 - x).view(B, 1, 1, 1) * torch.eye(4, device=x.device)
+            memory_egopose1 = self.memory_egopose[:, self.num_propagated:]
+            self.memory_egopose = torch.concat([memory_egopose0, memory_egopose1], dim=1)
 
     def position_embeding(self, data, memory_centers, topk_indexes, img_metas):
         eps = 1e-5
@@ -586,12 +593,12 @@ class StreamPETRHeadONNX(AnchorFreeHead):
             outputs_class = self.cls_branches[lvl](outs_dec[lvl])
             tmp = self.reg_branches[lvl](outs_dec[lvl])
 
-            tmp[..., 0:3] += reference[..., 0:3]
-            tmp[..., 0:3] = tmp[..., 0:3].sigmoid()
-            # tmp03 = tmp[..., 0:3] + reference[..., 0:3]
-            # tmp03 = tmp03.sigmoid()
-            # tmp3_ = tmp[..., 3:]
-            # tmp = torch.concat([tmp03, tmp3_], dim=-1)
+            # tmp[..., 0:3] += reference[..., 0:3]
+            # tmp[..., 0:3] = tmp[..., 0:3].sigmoid()
+            tmp03 = tmp[..., 0:3] + reference[..., 0:3]
+            tmp03 = tmp03.sigmoid()
+            tmp3_ = tmp[..., 3:]
+            tmp = torch.concat([tmp03, tmp3_], dim=-1)
 
             print(tmp.shape)
             if torch.onnx.is_in_onnx_export():
@@ -612,7 +619,8 @@ class StreamPETRHeadONNX(AnchorFreeHead):
         # update the memory bank OUTSIDE
         # if not torch.onnx.is_in_onnx_export():
         #     self.post_update_memory(data, rec_ego_pose, all_cls_scores, all_bbox_preds, outs_dec, mask_dict)
-        self.memory_timestamp = self.memory_timestamp.to(torch.float64)
+
+        # self.memory_timestamp = self.memory_timestamp.to(torch.float64)
 
         if mask_dict and mask_dict['pad_size'] > 0:
             output_known_class = all_cls_scores[:, :, :mask_dict['pad_size'], :]
@@ -1047,8 +1055,13 @@ class StreamPETRHeadONNX(AnchorFreeHead):
         img2lidars = data['img2lidar']
 
         coords3d = torch.matmul(img2lidars, coords).squeeze(-1)[..., :3]
-        coords3d[..., 0:3] = (coords3d[..., 0:3] - self.position_range[0:3]) / (
+        # coords3d[..., 0:3] = (coords3d[..., 0:3] - self.position_range[0:3]) / (
+        #             self.position_range[3:6] - self.position_range[0:3])
+        coords3d_03 = (coords3d[..., 0:3] - self.position_range[0:3]) / (
                     self.position_range[3:6] - self.position_range[0:3])
+        coords3d_3_ = coords3d[..., 3:]
+        coords3d = torch.concat([coords3d_03, coords3d_3_], dim=-1)
+
         coords3d = coords3d.reshape(B, -1, D * 3)
 
         pos_embed = inverse_sigmoid(coords3d)
